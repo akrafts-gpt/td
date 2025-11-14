@@ -11,10 +11,27 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 LIBS_DIR="$REPO_ROOT/libtd/src/main/libs"
 JAVA_DST_DIR="$REPO_ROOT/libtd/src/main/java/org/drinkless/td/libcore/telegram"
 TD_SRC_DIR="$REPO_ROOT/.td-src"
-TOOLCHAIN_FILE="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}/build/cmake/android.toolchain.cmake"
+ANDROID_NDK_DIR=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+TOOLCHAIN_FILE="${ANDROID_NDK_DIR}/build/cmake/android.toolchain.cmake"
+ANDROID_TOOLCHAIN_DIR="$ANDROID_NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+ANDROID_API_LEVEL=21
+OPENSSL_VERSION=${OPENSSL_VERSION:-"1.1.1w"}
+OPENSSL_URL=${OPENSSL_URL:-"https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"}
+OPENSSL_WORK_DIR="$REPO_ROOT/.openssl-android"
+OPENSSL_ARCHIVE="$OPENSSL_WORK_DIR/openssl.tar.gz"
+
+if [[ -z "$ANDROID_NDK_DIR" ]]; then
+  echo "ANDROID_NDK_HOME or ANDROID_NDK_ROOT must be set" >&2
+  exit 1
+fi
 
 if [[ ! -f "$TOOLCHAIN_FILE" ]]; then
   echo "Android NDK toolchain file not found: $TOOLCHAIN_FILE" >&2
+  exit 1
+fi
+
+if [[ ! -d "$ANDROID_TOOLCHAIN_DIR" ]]; then
+  echo "Unable to locate Android toolchain directory at $ANDROID_TOOLCHAIN_DIR" >&2
   exit 1
 fi
 
@@ -29,6 +46,67 @@ if [[ ${#ANDROID_ABIS[@]} -eq 0 ]]; then
   exit 1
 fi
 
+rm -rf "$OPENSSL_WORK_DIR"
+mkdir -p "$OPENSSL_WORK_DIR"
+
+echo "Downloading OpenSSL sources from $OPENSSL_URL"
+curl -LsSf "$OPENSSL_URL" -o "$OPENSSL_ARCHIVE"
+
+build_openssl_for_abi() {
+  local abi="$1"
+  local src_dir="$OPENSSL_WORK_DIR/src-$abi"
+  local install_dir="$OPENSSL_WORK_DIR/install-$abi"
+  local config target_host
+
+  case "$abi" in
+    arm64-v8a)
+      config="android-arm64"
+      target_host="aarch64-linux-android"
+      ;;
+    armeabi-v7a)
+      config="android-arm"
+      target_host="armv7a-linux-androideabi"
+      ;;
+    x86)
+      config="android-x86"
+      target_host="i686-linux-android"
+      ;;
+    x86_64)
+      config="android-x86_64"
+      target_host="x86_64-linux-android"
+      ;;
+    *)
+      echo "Unsupported ABI for OpenSSL build: $abi" >&2
+      return 1
+      ;;
+  esac
+
+  rm -rf "$src_dir" "$install_dir"
+  mkdir -p "$src_dir" "$install_dir"
+  tar -xzf "$OPENSSL_ARCHIVE" -C "$src_dir" --strip-components=1
+
+  echo "Building OpenSSL $OPENSSL_VERSION for $abi"
+  (
+    set -euo pipefail
+    export ANDROID_NDK_HOME="$ANDROID_NDK_DIR"
+    export ANDROID_NDK_ROOT="$ANDROID_NDK_DIR"
+    export PATH="$ANDROID_TOOLCHAIN_DIR/bin:$PATH"
+    export AR="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ar"
+    export AS="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-as"
+    export CC="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang"
+    export CXX="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang++"
+    export LD="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ld"
+    export RANLIB="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ranlib"
+    export STRIP="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-strip"
+    cd "$src_dir"
+    perl ./Configure "$config" -D__ANDROID_API__="$ANDROID_API_LEVEL" no-shared --prefix="$install_dir" --openssldir="$install_dir"
+    make -j"$(nproc)"
+    make install_sw
+  )
+
+  printf '%s\n' "$install_dir"
+}
+
 rm -rf "$TD_SRC_DIR"
 git clone https://github.com/tdlib/td.git "$TD_SRC_DIR"
 cd "$TD_SRC_DIR"
@@ -38,6 +116,7 @@ JAVA_SRC_DIR=""
 for ABI in "${ANDROID_ABIS[@]}"; do
   BUILD_DIR="$TD_SRC_DIR/build-android-$ABI"
   rm -rf "$BUILD_DIR"
+  OPENSSL_DIR=$(build_openssl_for_abi "$ABI")
   cmake -S "$TD_SRC_DIR" -B "$BUILD_DIR" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -45,8 +124,13 @@ for ABI in "${ANDROID_ABIS[@]}"; do
     -DTD_ENABLE_DOTNET=OFF \
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
     -DANDROID_ABI="$ABI" \
-    -DANDROID_PLATFORM=android-21 \
-    -DANDROID_STL=c++_shared
+    -DANDROID_PLATFORM="android-$ANDROID_API_LEVEL" \
+    -DANDROID_STL=c++_shared \
+    -DOPENSSL_ROOT_DIR="$OPENSSL_DIR" \
+    -DOPENSSL_INCLUDE_DIR="$OPENSSL_DIR/include" \
+    -DOPENSSL_CRYPTO_LIBRARY="$OPENSSL_DIR/lib/libcrypto.a" \
+    -DOPENSSL_SSL_LIBRARY="$OPENSSL_DIR/lib/libssl.a" \
+    -DOPENSSL_USE_STATIC_LIBS=ON
   cmake --build "$BUILD_DIR" --target tdjni
   mkdir -p "$LIBS_DIR/$ABI"
   rm -f "$LIBS_DIR/$ABI/libtdjni.so"
@@ -78,4 +162,4 @@ perl -0pi -e "s/(versionName\s+\")([^"]+)(\")/\1${VERSION_NAME}\3/" "$BUILD_GRAD
 perl -0pi -e "s|(com\\.github\\.tdlibx:td:)[^"']+|\1${VERSION_NAME}|g" "$README_MD"
 
 echo "TDLib update complete. Version code bumped to $NEW_VERSION_CODE with version name $VERSION_NAME."
-rm -rf "$TD_SRC_DIR"
+rm -rf "$TD_SRC_DIR" "$OPENSSL_WORK_DIR"

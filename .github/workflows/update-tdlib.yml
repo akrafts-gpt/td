@@ -37,7 +37,9 @@ jobs:
             python3-pip \
             gperf \
             zlib1g-dev \
-            libssl-dev
+            libssl-dev \
+            perl \
+            curl
 
       - name: Install Android NDK
         uses: nttld/setup-ndk@v1
