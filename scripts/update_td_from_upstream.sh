@@ -149,8 +149,9 @@ ensure_mime_type_mapping() {
   fi
 
   if [[ ! -f "$gperf_input" ]]; then
-    echo "Unable to locate $gperf_input required to generate MIME type mapping" >&2
-    exit 1
+    echo "Warning: $gperf_input not found. Skipping manual MIME type mapping generation." >&2
+    echo "         Assuming TDLib provides a pre-generated mapping in newer versions." >&2
+    return
   fi
 
   if ! command -v gperf >/dev/null 2>&1; then
