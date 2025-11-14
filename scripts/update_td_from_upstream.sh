@@ -140,8 +140,11 @@ git clone https://github.com/tdlib/td.git "$TD_SRC_DIR"
 cd "$TD_SRC_DIR"
 git checkout "$TDLIB_REF"
 
-ensure_mime_type_mapping() {
-  local output_file="$TD_SRC_DIR/tdutils/generate/auto/mime_type_to_extension.cpp"
+ensure_mapping_generated() {
+  local mapping_basename="$1"
+  local generator_mapping="$2"
+  local description="$3"
+  local output_file="$TD_SRC_DIR/tdutils/generate/auto/${mapping_basename}.cpp"
 
   if [[ -f "$output_file" ]]; then
     return
@@ -150,8 +153,8 @@ ensure_mime_type_mapping() {
   local gperf_input=""
   local candidate
   local -a candidate_paths=(
-    "$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.gperf"
-    "$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.in.gperf"
+    "$TD_SRC_DIR/tdutils/generate/${mapping_basename}.gperf"
+    "$TD_SRC_DIR/tdutils/generate/${mapping_basename}.in.gperf"
   )
 
   for candidate in "${candidate_paths[@]}"; do
@@ -162,7 +165,7 @@ ensure_mime_type_mapping() {
   done
 
   if [[ -z "$gperf_input" ]]; then
-    gperf_input=$(find "$TD_SRC_DIR" -name 'mime_type_to_extension*.gperf' -print -quit 2>/dev/null || true)
+    gperf_input=$(find "$TD_SRC_DIR" -name "${mapping_basename}*.gperf" -print -quit 2>/dev/null || true)
   fi
 
   local fallback_generator="$REPO_ROOT/scripts/generate_mime_type_mapping.py"
@@ -173,7 +176,7 @@ ensure_mime_type_mapping() {
 
   if [[ -n "$gperf_input" && -f "$gperf_input" ]]; then
     if command -v gperf >/dev/null 2>&1; then
-      echo "Generating MIME type to extension lookup via gperf (input: ${gperf_input#$TD_SRC_DIR/})"
+      echo "Generating ${description} lookup via gperf (input: ${gperf_input#$TD_SRC_DIR/})"
       mkdir -p "$(dirname "$output_file")"
       if ! gperf "$gperf_input" >"$output_file"; then
         echo "Failed to generate $output_file via gperf" >&2
@@ -182,22 +185,23 @@ ensure_mime_type_mapping() {
       return
     fi
 
-    echo "gperf not found; generating MIME type mapping via $fallback_generator" >&2
-    if ! python3 "$fallback_generator" --gperf-input "$gperf_input" --output "$output_file"; then
+    echo "gperf not found; generating ${description} mapping via $fallback_generator" >&2
+    if ! python3 "$fallback_generator" --mapping "$generator_mapping" --gperf-input "$gperf_input" --output "$output_file"; then
       echo "Failed to generate $output_file via $fallback_generator" >&2
       exit 1
     fi
     return
   fi
 
-  echo "No gperf source found under $TD_SRC_DIR; generating MIME type map via Python stdlib" >&2
-  if ! python3 "$fallback_generator" --use-stdlib --output "$output_file"; then
+  echo "No gperf source found under $TD_SRC_DIR; generating ${description} map via Python stdlib" >&2
+  if ! python3 "$fallback_generator" --mapping "$generator_mapping" --use-stdlib --output "$output_file"; then
     echo "Failed to generate $output_file via $fallback_generator" >&2
     exit 1
   fi
 }
 
-ensure_mime_type_mapping
+ensure_mapping_generated "mime_type_to_extension" "mime-to-extension" "MIME type to extension"
+ensure_mapping_generated "extension_to_mime_type" "extension-to-mime" "extension to MIME type"
 
 JAVA_SRC_DIR=""
 JNI_LIB_NAME=""
