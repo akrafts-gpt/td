@@ -200,8 +200,33 @@ ensure_mapping_generated() {
   fi
 }
 
+ensure_mapping_header() {
+  local header_file="$TD_SRC_DIR/tdutils/td/utils/$1.h"
+  local function_name="$2"
+  local argument_name="$3"
+
+  if [[ -f "$header_file" ]]; then
+    return
+  fi
+
+  mkdir -p "$(dirname "$header_file")"
+  cat >"$header_file" <<EOF
+#pragma once
+
+#include "td/utils/Slice.h"
+
+namespace td {
+
+CSlice ${function_name}(Slice ${argument_name});
+
+}  // namespace td
+EOF
+}
+
 ensure_mapping_generated "mime_type_to_extension" "mime-to-extension" "MIME type to extension"
 ensure_mapping_generated "extension_to_mime_type" "extension-to-mime" "extension to MIME type"
+ensure_mapping_header "mime_type_to_extension" "mime_type_to_extension" "mime_type"
+ensure_mapping_header "extension_to_mime_type" "extension_to_mime_type" "extension"
 
 JAVA_SRC_DIR=""
 JNI_LIB_NAME=""
