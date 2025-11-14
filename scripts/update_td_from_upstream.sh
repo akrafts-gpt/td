@@ -49,6 +49,32 @@ fi
 rm -rf "$OPENSSL_WORK_DIR"
 mkdir -p "$OPENSSL_WORK_DIR"
 
+detect_jni_library_name() {
+  local build_dir="$1"
+  local native_client=""
+  if [[ -d "$build_dir/java" ]]; then
+    native_client=$(find "$build_dir/java" -name NativeClient.java -print -quit 2>/dev/null || true)
+  fi
+  if [[ -n "$native_client" && -f "$native_client" ]]; then
+    local lib_name
+    lib_name=$(perl -ne 'if (/System\\.loadLibrary\("([^"]+)"\)/) { print $1; exit }' "$native_client" || true)
+    if [[ -n "$lib_name" ]]; then
+      printf '%s\n' "$lib_name"
+      return 0
+    fi
+  fi
+
+  for candidate in tdjni tdapi; do
+    if [[ -f "$build_dir/lib${candidate}.so" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  echo "Unable to detect JNI library name under $build_dir" >&2
+  return 1
+}
+
 echo "Downloading OpenSSL sources from $OPENSSL_URL"
 curl -LsSf "$OPENSSL_URL" -o "$OPENSSL_ARCHIVE"
 
@@ -115,6 +141,7 @@ cd "$TD_SRC_DIR"
 git checkout "$TDLIB_REF"
 
 JAVA_SRC_DIR=""
+JNI_LIB_NAME=""
 for ABI in "${ANDROID_ABIS[@]}"; do
   BUILD_DIR="$TD_SRC_DIR/build-android-$ABI"
   rm -rf "$BUILD_DIR"
@@ -133,10 +160,22 @@ for ABI in "${ANDROID_ABIS[@]}"; do
     -DOPENSSL_CRYPTO_LIBRARY="$OPENSSL_DIR/lib/libcrypto.a" \
     -DOPENSSL_SSL_LIBRARY="$OPENSSL_DIR/lib/libssl.a" \
     -DOPENSSL_USE_STATIC_LIBS=ON
-  cmake --build "$BUILD_DIR" --target tdjni
+  cmake --build "$BUILD_DIR"
+  if [[ -z "$JNI_LIB_NAME" ]]; then
+    JNI_LIB_NAME=$(detect_jni_library_name "$BUILD_DIR")
+  fi
+  if [[ -z "$JNI_LIB_NAME" ]]; then
+    echo "Unable to determine JNI library name" >&2
+    exit 1
+  fi
+  JNI_LIB_FILE="lib${JNI_LIB_NAME}.so"
+  if [[ ! -f "$BUILD_DIR/$JNI_LIB_FILE" ]]; then
+    echo "Unable to find $JNI_LIB_FILE under $BUILD_DIR" >&2
+    exit 1
+  fi
   mkdir -p "$LIBS_DIR/$ABI"
-  rm -f "$LIBS_DIR/$ABI/libtdjni.so"
-  cp "$BUILD_DIR/libtdjni.so" "$LIBS_DIR/$ABI/libtdjni.so"
+  rm -f "$LIBS_DIR/$ABI"/*.so
+  cp "$BUILD_DIR/$JNI_LIB_FILE" "$LIBS_DIR/$ABI/$JNI_LIB_FILE"
   if [[ -z "$JAVA_SRC_DIR" ]]; then
     JAVA_SRC_DIR="$BUILD_DIR/java/org/drinkless/td/libcore/telegram"
   fi
