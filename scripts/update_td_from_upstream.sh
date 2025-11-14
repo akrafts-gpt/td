@@ -140,6 +140,34 @@ git clone https://github.com/tdlib/td.git "$TD_SRC_DIR"
 cd "$TD_SRC_DIR"
 git checkout "$TDLIB_REF"
 
+ensure_mime_type_mapping() {
+  local gperf_input="$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.gperf"
+  local output_file="$TD_SRC_DIR/tdutils/generate/auto/mime_type_to_extension.cpp"
+
+  if [[ -f "$output_file" ]]; then
+    return
+  fi
+
+  if [[ ! -f "$gperf_input" ]]; then
+    echo "Unable to locate $gperf_input required to generate MIME type mapping" >&2
+    exit 1
+  fi
+
+  if ! command -v gperf >/dev/null 2>&1; then
+    echo "gperf is required to generate $output_file" >&2
+    exit 1
+  fi
+
+  echo "Generating MIME type to extension lookup via gperf"
+  mkdir -p "$(dirname "$output_file")"
+  if ! gperf "$gperf_input" >"$output_file"; then
+    echo "Failed to generate $output_file via gperf" >&2
+    exit 1
+  fi
+}
+
+ensure_mime_type_mapping
+
 JAVA_SRC_DIR=""
 JNI_LIB_NAME=""
 for ABI in "${ANDROID_ABIS[@]}"; do
