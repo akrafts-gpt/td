@@ -165,30 +165,33 @@ ensure_mime_type_mapping() {
     gperf_input=$(find "$TD_SRC_DIR" -name 'mime_type_to_extension*.gperf' -print -quit 2>/dev/null || true)
   fi
 
-  if [[ -z "$gperf_input" || ! -f "$gperf_input" ]]; then
-    echo "Skipping manual MIME type map generation; no mime_type_to_extension gperf source found under $TD_SRC_DIR" >&2
-    echo "Assuming TDLib's CMake build handles this step for the checked-out revision." >&2
-    return
-  fi
-
-  if command -v gperf >/dev/null 2>&1; then
-    echo "Generating MIME type to extension lookup via gperf (input: ${gperf_input#$TD_SRC_DIR/})"
-    mkdir -p "$(dirname "$output_file")"
-    if ! gperf "$gperf_input" >"$output_file"; then
-      echo "Failed to generate $output_file via gperf" >&2
-      exit 1
-    fi
-    return
-  fi
-
   local fallback_generator="$REPO_ROOT/scripts/generate_mime_type_mapping.py"
   if [[ ! -x "$fallback_generator" ]]; then
     echo "gperf is unavailable and $fallback_generator is missing" >&2
     exit 1
   fi
 
-  echo "gperf not found; generating MIME type mapping via $fallback_generator" >&2
-  if ! python3 "$fallback_generator" "$gperf_input" "$output_file"; then
+  if [[ -n "$gperf_input" && -f "$gperf_input" ]]; then
+    if command -v gperf >/dev/null 2>&1; then
+      echo "Generating MIME type to extension lookup via gperf (input: ${gperf_input#$TD_SRC_DIR/})"
+      mkdir -p "$(dirname "$output_file")"
+      if ! gperf "$gperf_input" >"$output_file"; then
+        echo "Failed to generate $output_file via gperf" >&2
+        exit 1
+      fi
+      return
+    fi
+
+    echo "gperf not found; generating MIME type mapping via $fallback_generator" >&2
+    if ! python3 "$fallback_generator" --gperf-input "$gperf_input" --output "$output_file"; then
+      echo "Failed to generate $output_file via $fallback_generator" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  echo "No gperf source found under $TD_SRC_DIR; generating MIME type map via Python stdlib" >&2
+  if ! python3 "$fallback_generator" --use-stdlib --output "$output_file"; then
     echo "Failed to generate $output_file via $fallback_generator" >&2
     exit 1
   fi
