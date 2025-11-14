@@ -1,0 +1,71 @@
+name: Update TDLib
+
+on:
+  workflow_dispatch:
+    inputs:
+      tdlib_ref:
+        description: 'TDLib ref (branch / tag / commit) from https://github.com/tdlib/td'
+        required: true
+        default: 'master'
+      version_name:
+        description: 'Version string to publish (e.g., 1.8.56)'
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            python3 \
+            python3-pip \
+            gperf \
+            zlib1g-dev \
+            libssl-dev
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+
+      - name: Update TDLib artifacts
+        env:
+          TDLIB_REF: ${{ github.event.inputs.tdlib_ref }}
+          VERSION_NAME: ${{ github.event.inputs.version_name }}
+        run: |
+          bash scripts/update_td_from_upstream.sh
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit, tag, and push
+        env:
+          VERSION_NAME: ${{ github.event.inputs.version_name }}
+        run: |
+          if git diff --quiet; then
+            echo "No changes detected after TDLib update."
+            exit 1
+          fi
+          git add -A
+          git commit -m "Update TDLib to ${VERSION_NAME}"
+          git tag "${VERSION_NAME}"
+          git push origin HEAD
+          git push origin "${VERSION_NAME}"
