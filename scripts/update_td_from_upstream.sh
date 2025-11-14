@@ -81,28 +81,30 @@ build_openssl_for_abi() {
       ;;
   esac
 
-  rm -rf "$src_dir" "$install_dir"
-  mkdir -p "$src_dir" "$install_dir"
-  tar -xzf "$OPENSSL_ARCHIVE" -C "$src_dir" --strip-components=1
+  {
+    rm -rf "$src_dir" "$install_dir"
+    mkdir -p "$src_dir" "$install_dir"
+    tar -xzf "$OPENSSL_ARCHIVE" -C "$src_dir" --strip-components=1
 
-  echo "Building OpenSSL $OPENSSL_VERSION for $abi"
-  (
-    set -euo pipefail
-    export ANDROID_NDK_HOME="$ANDROID_NDK_DIR"
-    export ANDROID_NDK_ROOT="$ANDROID_NDK_DIR"
-    export PATH="$ANDROID_TOOLCHAIN_DIR/bin:$PATH"
-    export AR="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ar"
-    export AS="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-as"
-    export CC="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang"
-    export CXX="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang++"
-    export LD="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ld"
-    export RANLIB="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ranlib"
-    export STRIP="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-strip"
-    cd "$src_dir"
-    perl ./Configure "$config" -D__ANDROID_API__="$ANDROID_API_LEVEL" no-shared --prefix="$install_dir" --openssldir="$install_dir"
-    make -j"$(nproc)"
-    make install_sw
-  )
+    echo "Building OpenSSL $OPENSSL_VERSION for $abi"
+    (
+      set -euo pipefail
+      export ANDROID_NDK_HOME="$ANDROID_NDK_DIR"
+      export ANDROID_NDK_ROOT="$ANDROID_NDK_DIR"
+      export PATH="$ANDROID_TOOLCHAIN_DIR/bin:$PATH"
+      export AR="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ar"
+      export AS="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-as"
+      export CC="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang"
+      export CXX="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}${ANDROID_API_LEVEL}-clang++"
+      export LD="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ld"
+      export RANLIB="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-ranlib"
+      export STRIP="$ANDROID_TOOLCHAIN_DIR/bin/${target_host}-strip"
+      cd "$src_dir"
+      perl ./Configure "$config" -D__ANDROID_API__="$ANDROID_API_LEVEL" no-shared --prefix="$install_dir" --openssldir="$install_dir"
+      make -j"$(nproc)"
+      make install_sw
+    )
+  } >&2
 
   printf '%s\n' "$install_dir"
 }
