@@ -166,9 +166,9 @@ ensure_mime_type_mapping() {
   fi
 
   if [[ -z "$gperf_input" || ! -f "$gperf_input" ]]; then
-    echo "Unable to locate mime_type_to_extension gperf source under $TD_SRC_DIR" >&2
-    echo "Please verify TDLib's source layout or update this script." >&2
-    exit 1
+    echo "Skipping manual MIME type map generation; no mime_type_to_extension gperf source found under $TD_SRC_DIR" >&2
+    echo "Assuming TDLib's CMake build handles this step for the checked-out revision." >&2
+    return
   fi
 
   if ! command -v gperf >/dev/null 2>&1; then
