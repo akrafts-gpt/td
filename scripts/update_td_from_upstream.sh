@@ -141,17 +141,34 @@ cd "$TD_SRC_DIR"
 git checkout "$TDLIB_REF"
 
 ensure_mime_type_mapping() {
-  local gperf_input="$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.gperf"
   local output_file="$TD_SRC_DIR/tdutils/generate/auto/mime_type_to_extension.cpp"
 
   if [[ -f "$output_file" ]]; then
     return
   fi
 
-  if [[ ! -f "$gperf_input" ]]; then
-    echo "Warning: $gperf_input not found. Skipping manual MIME type mapping generation." >&2
-    echo "         Assuming TDLib provides a pre-generated mapping in newer versions." >&2
-    return
+  local gperf_input=""
+  local candidate
+  local -a candidate_paths=(
+    "$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.gperf"
+    "$TD_SRC_DIR/tdutils/generate/mime_type_to_extension.in.gperf"
+  )
+
+  for candidate in "${candidate_paths[@]}"; do
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+      gperf_input="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$gperf_input" ]]; then
+    gperf_input=$(find "$TD_SRC_DIR" -name 'mime_type_to_extension*.gperf' -print -quit 2>/dev/null || true)
+  fi
+
+  if [[ -z "$gperf_input" || ! -f "$gperf_input" ]]; then
+    echo "Unable to locate mime_type_to_extension gperf source under $TD_SRC_DIR" >&2
+    echo "Please verify TDLib's source layout or update this script." >&2
+    exit 1
   fi
 
   if ! command -v gperf >/dev/null 2>&1; then
@@ -159,7 +176,7 @@ ensure_mime_type_mapping() {
     exit 1
   fi
 
-  echo "Generating MIME type to extension lookup via gperf"
+  echo "Generating MIME type to extension lookup via gperf (input: ${gperf_input#$TD_SRC_DIR/})"
   mkdir -p "$(dirname "$output_file")"
   if ! gperf "$gperf_input" >"$output_file"; then
     echo "Failed to generate $output_file via gperf" >&2
