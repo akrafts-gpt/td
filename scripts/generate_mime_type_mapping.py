@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Fallback generator for tdutils/generate/auto/mime_type_to_extension.cpp."""
+"""Generate tdutils/generate/auto/mime_type_to_extension.cpp."""
 from __future__ import annotations
 
 import argparse
+import mimetypes
 import pathlib
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 
 def parse_gperf_entries(text: Sequence[str]) -> List[Tuple[str, str]]:
@@ -79,20 +80,53 @@ def render_cpp(entries: Iterable[Tuple[str, str]]) -> str:
     return "".join(lines)
 
 
+def entries_from_stdlib_mimetypes() -> List[Tuple[str, str]]:
+    mimetypes.init()
+    preferred_extensions: Dict[str, str] = {}
+
+    def add_entries(source: Dict[str, str]) -> None:
+        for ext, mime in source.items():
+            normalized_ext = ext.lstrip(".").strip().lower()
+            normalized_mime = mime.strip().lower()
+            if not normalized_ext or "/" not in normalized_mime:
+                continue
+            current = preferred_extensions.get(normalized_mime)
+            if current is None or len(normalized_ext) < len(current):
+                preferred_extensions[normalized_mime] = normalized_ext
+
+    add_entries(mimetypes.types_map)
+    add_entries(mimetypes.common_types)
+
+    return sorted(preferred_extensions.items(), key=lambda item: item[0])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("gperf_input", type=pathlib.Path)
-    parser.add_argument("output", type=pathlib.Path)
+    parser.add_argument("--gperf-input", type=pathlib.Path)
+    parser.add_argument(
+        "--use-stdlib",
+        action="store_true",
+        help="Use Python's mimetypes module instead of a gperf input file.",
+    )
+    parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    if not args.gperf_input.is_file():
-        raise SystemExit(f"Unable to find gperf input file: {args.gperf_input}")
+    entries: List[Tuple[str, str]]
 
-    entries = parse_gperf_entries(args.gperf_input.read_text().splitlines())
-    if not entries:
-        raise SystemExit(
-            f"No entries found in gperf input {args.gperf_input}; cannot generate mapping"
-        )
+    if args.gperf_input:
+        if not args.gperf_input.is_file():
+            raise SystemExit(f"Unable to find gperf input file: {args.gperf_input}")
+        entries = parse_gperf_entries(args.gperf_input.read_text().splitlines())
+        if not entries:
+            raise SystemExit(
+                f"No entries found in gperf input {args.gperf_input}; cannot generate mapping"
+            )
+    elif args.use_stdlib:
+        entries = entries_from_stdlib_mimetypes()
+        if not entries:
+            raise SystemExit("Unable to derive MIME type mapping from Python stdlib")
+    else:
+        raise SystemExit("Either --gperf-input or --use-stdlib must be provided")
 
     output_text = render_cpp(entries)
     args.output.parent.mkdir(parents=True, exist_ok=True)
