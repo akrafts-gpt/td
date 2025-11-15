@@ -228,6 +228,73 @@ ensure_mapping_generated "extension_to_mime_type" "extension-to-mime" "extension
 ensure_mapping_header "mime_type_to_extension" "mime_type_to_extension" "mime_type"
 ensure_mapping_header "extension_to_mime_type" "extension_to_mime_type" "extension"
 
+ensure_td_api_split_sources() {
+  local cmake_file="$TD_SRC_DIR/td/generate/CMakeLists.txt"
+  local td_api_dir="$TD_SRC_DIR/td/generate/auto/td/telegram"
+  local td_api_monolith="$td_api_dir/td_api.cpp"
+
+  if [[ ! -f "$cmake_file" || ! -f "$td_api_monolith" ]]; then
+    return
+  fi
+
+  mapfile -t split_sources < <(
+    python3 - "$cmake_file" <<'PY'
+import pathlib
+import re
+import sys
+
+cmake_file = pathlib.Path(sys.argv[1])
+content = cmake_file.read_text(encoding='utf-8', errors='ignore')
+pattern = re.compile(r'td/generate/auto/td/telegram/(td_api_\\d+\\.cpp)')
+seen = []
+for match in pattern.finditer(content):
+    candidate = match.group(1)
+    if candidate not in seen:
+        seen.append(candidate)
+for candidate in seen:
+    print(candidate)
+PY
+  )
+
+  if [[ ${#split_sources[@]} -eq 0 ]]; then
+    return
+  fi
+
+  local needs_fallback=0
+  for rel_path in "${split_sources[@]}"; do
+    if [[ ! -f "$TD_SRC_DIR/$rel_path" ]]; then
+      needs_fallback=1
+      break
+    fi
+  done
+
+  if [[ $needs_fallback -eq 0 ]]; then
+    return
+  fi
+
+  echo "Split td_api.cpp sources missing; generating fallback split wrappers" >&2
+  local wrote_real_source=0
+  for rel_path in "${split_sources[@]}"; do
+    local abs_path="$TD_SRC_DIR/$rel_path"
+    mkdir -p "$(dirname "$abs_path")"
+    if [[ $wrote_real_source -eq 0 ]]; then
+      cat >"$abs_path" <<'EOF'
+// Auto-generated fallback source.
+// The upstream split sources are missing, so include the monolithic td_api.cpp once.
+#include "td/generate/auto/td/telegram/td_api.cpp"
+EOF
+      wrote_real_source=1
+    else
+      cat >"$abs_path" <<'EOF'
+// Auto-generated placeholder translation unit used when upstream split sources
+// are unavailable. This file intentionally left mostly blank.
+EOF
+    fi
+  done
+}
+
+ensure_td_api_split_sources
+
 JAVA_SRC_DIR=""
 JNI_LIB_NAME=""
 for ABI in "${ANDROID_ABIS[@]}"; do
