@@ -4,70 +4,149 @@ on:
   workflow_dispatch:
     inputs:
       tdlib_ref:
-        description: 'TDLib ref (branch / tag / commit) from https://github.com/tdlib/td'
-        required: true
-        default: 'master'
+        description: "TDLib ref (branch, tag, or commit) to build"
+        required: false
+        default: master
       version_name:
-        description: 'Version string to publish (e.g., 1.8.56)'
+        description: "Version string for the JitPack release"
         required: true
 
+permissions:
+  contents: write
+
 jobs:
-  update:
+  build:
     runs-on: ubuntu-latest
+    env:
+      TDLIB_REF: ${{ inputs.tdlib_ref }}
+      VERSION_NAME: ${{ inputs.version_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get install -y \
             build-essential \
+            git \
             cmake \
             ninja-build \
+            pkg-config \
+            ccache \
+            unzip \
+            wget \
             python3 \
             python3-pip \
+            php \
             gperf \
+            rsync \
             zlib1g-dev \
             libssl-dev \
-            perl \
-            curl
+            default-jdk \
+            clang \
+            autoconf \
+            automake \
+            libtool
 
-      - name: Install Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r25c
-
-      - name: Update TDLib artifacts
-        env:
-          TDLIB_REF: ${{ github.event.inputs.tdlib_ref }}
-          VERSION_NAME: ${{ github.event.inputs.version_name }}
+      - name: Clone TDLib repository
         run: |
-          bash scripts/update_td_from_upstream.sh
+          git clone https://github.com/tdlib/td.git external/td
+          cd external/td
+          git checkout "$TDLIB_REF"
 
-      - name: Configure git user
+      - name: Build TDLib via official scripts
+        working-directory: external/td/example/android
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          ./check-environment.sh
+          ./fetch-sdk.sh
+          ./build-openssl.sh
+          ./build-tdlib.sh
 
-      - name: Commit, tag, and push
+      - name: Update TDLib artifacts in libtd module
+        run: |
+          set -euo pipefail
+          rm -rf libtd/src/main/libs
+          mkdir -p libtd/src/main/libs
+          rsync -a --delete external/td/example/android/tdlib/libs/ libtd/src/main/libs/
+
+          rm -rf libtd/src/main/java/org/drinkless/td/libcore/telegram
+          mkdir -p libtd/src/main/java/org/drinkless/td/libcore
+          rsync -a --delete \
+            external/td/example/android/tdlib/java/org/drinkless/td/libcore/telegram/ \
+            libtd/src/main/java/org/drinkless/td/libcore/telegram/
+
+      - name: Update version metadata
         env:
-          VERSION_NAME: ${{ github.event.inputs.version_name }}
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          python3 - <<'PY'
+import pathlib
+import re
+from os import environ
+path = pathlib.Path('libtd/build.gradle')
+text = path.read_text()
+
+version_name = environ['VERSION_NAME']
+
+def bump_version_code(match):
+    return f"versionCode {int(match.group(1)) + 1}"
+
+text = re.sub(r'versionCode\s+(\d+)', bump_version_code, text, count=1)
+text = re.sub(r'versionName\s+"[^"]*"', f'versionName "{version_name}"', text, count=1)
+path.write_text(text)
+PY
+
+      - name: Update README dependency snippet
+        env:
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          python3 - <<'PY'
+import pathlib
+import re
+from os import environ
+path = pathlib.Path('README.md')
+text = path.read_text()
+version_name = environ['VERSION_NAME']
+text = re.sub(r'implementation\s+"com\.github\.tdlibx:td:[^"]+"',
+              f'implementation "com.github.tdlibx:td:{version_name}"', text, count=1)
+path.write_text(text)
+PY
+
+      - name: Show git status and diff
+        run: |
+          git status -sb
+          git diff --stat
+
+      - name: Check for changes
+        id: changes
         run: |
           if git diff --quiet; then
-            echo "No changes detected after TDLib update."
-            exit 1
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
-          git add -A
+
+      - name: Commit and tag
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
           git commit -m "Update TDLib to ${VERSION_NAME}"
           git tag "${VERSION_NAME}"
+
+      - name: Push changes
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
           git push origin HEAD
           git push origin "${VERSION_NAME}"
+
+      - name: No changes detected
+        if: steps.changes.outputs.changed != 'true'
+        run: echo "No changes to commit."
