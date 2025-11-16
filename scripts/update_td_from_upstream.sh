@@ -233,7 +233,7 @@ ensure_td_api_split_sources() {
   local td_api_dir="$TD_SRC_DIR/td/generate/auto/td/telegram"
   local td_api_monolith="$td_api_dir/td_api.cpp"
 
-  if [[ ! -f "$cmake_file" || ! -f "$td_api_monolith" ]]; then
+  if [[ ! -f "$cmake_file" ]]; then
     return
   fi
 
