@@ -249,7 +249,7 @@ import re
 import sys
 
 ninja_file = pathlib.Path(sys.argv[1])
-pattern = re.compile(r'td/generate/auto/td/telegram/(td_api_\\d+\\.cpp)')
+pattern = re.compile(r'(td/generate/auto/td/telegram/td_api_\\d+\\.cpp)')
 seen = []
 for line in ninja_file.read_text(encoding='utf-8', errors='ignore').splitlines():
     for match in pattern.finditer(line):
@@ -272,7 +272,7 @@ import sys
 
 cmake_file = pathlib.Path(sys.argv[1])
 content = cmake_file.read_text(encoding='utf-8', errors='ignore')
-pattern = re.compile(r'td/generate/auto/td/telegram/(td_api_\\d+\\.cpp)')
+pattern = re.compile(r'(td/generate/auto/td/telegram/td_api_\\d+\\.cpp)')
 seen = []
 for match in pattern.finditer(content):
     candidate = match.group(1)
