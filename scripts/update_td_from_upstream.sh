@@ -228,17 +228,44 @@ ensure_mapping_generated "extension_to_mime_type" "extension-to-mime" "extension
 ensure_mapping_header "mime_type_to_extension" "mime_type_to_extension" "mime_type"
 ensure_mapping_header "extension_to_mime_type" "extension_to_mime_type" "extension"
 
-ensure_td_api_split_sources() {
-  local cmake_file="$TD_SRC_DIR/td/generate/CMakeLists.txt"
-  local td_api_dir="$TD_SRC_DIR/td/generate/auto/td/telegram"
-  local td_api_monolith="$td_api_dir/td_api.cpp"
+TD_API_SPLIT_WRAPPERS_READY=0
 
-  if [[ ! -f "$cmake_file" ]]; then
+ensure_td_api_split_sources() {
+  if [[ $TD_API_SPLIT_WRAPPERS_READY -eq 1 ]]; then
     return
   fi
 
-  mapfile -t split_sources < <(
-    python3 - "$cmake_file" <<'PY'
+  local build_dir="${1:-}"
+  local cmake_file="$TD_SRC_DIR/td/generate/CMakeLists.txt"
+  local -a split_sources=()
+
+  if [[ -n "$build_dir" ]]; then
+    local build_ninja="$build_dir/build.ninja"
+    if [[ -f "$build_ninja" ]]; then
+      mapfile -t split_sources < <(
+        python3 - "$build_ninja" <<'PY'
+import pathlib
+import re
+import sys
+
+ninja_file = pathlib.Path(sys.argv[1])
+pattern = re.compile(r'td/generate/auto/td/telegram/(td_api_\\d+\\.cpp)')
+seen = []
+for line in ninja_file.read_text(encoding='utf-8', errors='ignore').splitlines():
+    for match in pattern.finditer(line):
+        candidate = match.group(1)
+        if candidate not in seen:
+            seen.append(candidate)
+for candidate in seen:
+    print(candidate)
+PY
+      )
+    fi
+  fi
+
+  if [[ ${#split_sources[@]} -eq 0 && -f "$cmake_file" ]]; then
+    mapfile -t split_sources < <(
+      python3 - "$cmake_file" <<'PY'
 import pathlib
 import re
 import sys
@@ -254,7 +281,8 @@ for match in pattern.finditer(content):
 for candidate in seen:
     print(candidate)
 PY
-  )
+    )
+  fi
 
   if [[ ${#split_sources[@]} -eq 0 ]]; then
     return
@@ -269,6 +297,7 @@ PY
   done
 
   if [[ $needs_fallback -eq 0 ]]; then
+    TD_API_SPLIT_WRAPPERS_READY=1
     return
   fi
 
@@ -291,6 +320,8 @@ EOF
 EOF
     fi
   done
+
+  TD_API_SPLIT_WRAPPERS_READY=1
 }
 
 ensure_td_api_split_sources
@@ -315,6 +346,7 @@ for ABI in "${ANDROID_ABIS[@]}"; do
     -DOPENSSL_CRYPTO_LIBRARY="$OPENSSL_DIR/lib/libcrypto.a" \
     -DOPENSSL_SSL_LIBRARY="$OPENSSL_DIR/lib/libssl.a" \
     -DOPENSSL_USE_STATIC_LIBS=ON
+  ensure_td_api_split_sources "$BUILD_DIR"
   cmake --build "$BUILD_DIR"
   if [[ -z "$JNI_LIB_NAME" ]]; then
     JNI_LIB_NAME=$(detect_jni_library_name "$BUILD_DIR")
