@@ -2,7 +2,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'maven-publish'
 
 group = 'com.github.tdlibx'
-version = '1.8.6'
+version = '1.8.56'
 
 android {
     compileSdkVersion 36
@@ -17,8 +17,8 @@ android {
     defaultConfig {
         minSdkVersion 10
         targetSdkVersion 36
-        versionCode 186
-        versionName "1.8.6"
+        versionCode 1856
+        versionName "1.8.56"
     }
 
     buildTypes {
@@ -34,11 +34,7 @@ android {
     }
 
     publishing {
-        singleVariant("release") {
-            // if you don't want sources/javadoc, remove these lines
-            withSourcesJar()
-            withJavadocJar()
-        }
+        singleVariant("release")
     }
 }
 
@@ -58,3 +54,4 @@ afterEvaluate {
 dependencies {
     api 'androidx.annotation:annotation:1.9.1'
 }
+
